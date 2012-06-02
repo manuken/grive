@@ -34,11 +34,12 @@ namespace http
 }
 
 class OAuth2 ;
+class Json ;
 
 class Drive
 {
 public :
-	Drive( OAuth2& auth ) ;
+	Drive( OAuth2& auth, const Json& options ) ;
 
 	void Update() ;
 	void Sync() ;
@@ -47,7 +48,7 @@ public :
 	struct Error : virtual Exception {} ;
 	
 private :
-	void ConstructDirTree( http::Agent *http ) ;
+	void SyncFolders( http::Agent *http ) ;
     void file();
 	
 private :

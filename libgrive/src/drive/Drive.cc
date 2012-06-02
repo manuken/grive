@@ -52,33 +52,22 @@ namespace
 	const std::string state_file = ".grive_state" ;
 }
 
-Drive::Drive( OAuth2& auth ) :
+Drive::Drive( OAuth2& auth, const Json& options ) :
 	m_auth( auth ),
-	m_state( state_file )
+	m_state( state_file, options )
 {
 	m_http_hdr.push_back( "Authorization: Bearer " + m_auth.AccessToken() ) ;
 	m_http_hdr.push_back( "GData-Version: 3.0" ) ;
 
-	http::Agent http ;
-	http::XmlResponse xrsp ;
-	http.Get( feed_metadata, &xrsp, m_http_hdr ) ;
-	
-	std::string change_stamp = xrsp.Response()["docs:largestChangestamp"]["@value"] ;
-	Trace( "change stamp is %1%", change_stamp ) ;
-
-	m_state.ChangeStamp( change_stamp ) ;
+	Log( "Reading local directories", log::info ) ;
 	m_state.FromLocal( "." ) ;
 	
-	ConstructDirTree( &http ) ;
+	http::Agent http ;
+	SyncFolders( &http ) ;
 	
-	std::string uri = feed_base + "?showfolders=true&showroot=true" ;
-/*	if ( !change_stamp.empty() )
-	{
-		int ichangestamp = std::atoi( change_stamp.c_str() ) + 1 ;
-		uri = (boost::format( "%1%&start-index=%2%" ) % uri % ichangestamp ).str() ;
-	}
-*/
-	http.Get( uri, &xrsp, m_http_hdr ) ;
+	Log( "Reading remote server file list", log::info ) ;
+	http::XmlResponse xrsp ;
+	http.Get( feed_base + "?showfolders=true&showroot=true", &xrsp, m_http_hdr ) ;
 	xml::Node resp = xrsp.Response() ;
 
 	m_resume_link = resp["link"].
@@ -110,7 +99,7 @@ Drive::Drive( OAuth2& auth ) :
 				
 				else if ( parent != 0 && !parent->IsFolder() )
 					Log( "warning: entry %1% has parent %2% which is not a folder, ignored",
-						entry.Title(), parent->Name(), log::warning ) ;
+						entry.Title(), parent->Name(), log::verbose ) ;
 				
 				else
 					m_state.FromRemote( entry ) ;
@@ -133,8 +122,10 @@ void Drive::SaveState()
 	m_state.Write( state_file ) ;
 }
 
-void Drive::ConstructDirTree( http::Agent *http )
+void Drive::SyncFolders( http::Agent *http )
 {
+	Log( "Synchronizing folders", log::info ) ;
+
 	http::XmlResponse xml ;
 	http->Get( feed_base + "/-/folder?max-results=50&showroot=true", &xml, m_http_hdr ) ;
 
@@ -151,7 +142,7 @@ void Drive::ConstructDirTree( http::Agent *http )
 			if ( e.Kind() == "folder" )
 			{
 				if ( e.ParentHrefs().size() != 1 )
-					Log( "folder \"%1%\" has multiple parents, ignored", e.Title(), log::warning ) ;
+					Log( "folder \"%1%\" has multiple parents, ignored", e.Title(), log::verbose ) ;
 				
 				else if ( e.Title().find('/') != std::string::npos )
 					Log( "folder \"%1%\" contains a slash in its name, ignored", e.Title(), log::verbose ) ;
@@ -174,9 +165,10 @@ void Drive::ConstructDirTree( http::Agent *http )
 
 void Drive::Update()
 {
+	Log( "Synchronizing files", log::info ) ;
+	
 	http::Agent http ;
-	std::for_each( m_state.begin(), m_state.end(),
-		boost::bind( &Resource::Sync, _1, &http, m_http_hdr ) ) ;
+	m_state.Sync( &http, m_http_hdr ) ;
 }
 
 } // end of namespace

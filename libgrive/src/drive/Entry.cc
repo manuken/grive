@@ -48,32 +48,20 @@ Entry::Entry( const xml::Node& n )
 }
 
 /// construct an entry from a file or folder in local directory
-Entry::Entry( const fs::path& path ) :
-	m_title		( path.filename().string() ),
-	m_filename	( path.filename().string() ),
-	m_kind		( fs::is_directory(path) ? "folder" : "file" ),
-	m_md5		( fs::is_directory(path) ? "" : crypt::MD5( path ) ),
-	m_mtime		( os::FileMTime( path ) )
+Entry::Entry( const std::string& name, const std::string& kind ) :
+	m_title		( name ),
+	m_filename	( name ),
+	m_kind		( kind )
 {
 }
 
-Entry::Entry(
-	const std::string&	name,
-	const std::string&	resource_id,
-	const std::string&	href,
-	const std::string&	md5,
-	const std::string&	kind,
-	const DateTime&		mtime,
-	const std::string&	parent_href ) :
-	m_title			( name ),
-	m_filename		( name ),
-	m_kind			( kind ),
-	m_md5			( md5 ),
-	m_resource_id	( resource_id ),
-	m_parent_hrefs	( 1, parent_href ),
-	m_self_href		( href ),
-	m_mtime			( mtime )
+void Entry::FromLocal( const fs::path& path )
 {
+	m_title		= path.filename().string() ;
+	m_filename	= path.filename().string() ;
+	m_kind		= fs::is_directory(path) ? "folder"	: "file" ;
+	m_md5		= fs::is_directory(path) ? ""		: crypt::MD5( path ) ;
+	m_mtime		= fs::exists(path) ? os::FileCTime( path ) : DateTime() ;
 }
 
 void Entry::Update( const xml::Node& n )
@@ -109,6 +97,7 @@ const std::vector<std::string>& Entry::ParentHrefs() const
 void Entry::AssignID( const Entry& entry )
 {
 	m_self_href		= entry.m_self_href ;
+	m_content_src	= entry.m_content_src ;
 	m_resource_id	= entry.m_resource_id ;
 	m_parent_hrefs	= entry.m_parent_hrefs ;
 	m_edit_link		= entry.m_edit_link ;

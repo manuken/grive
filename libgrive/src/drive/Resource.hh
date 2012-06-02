@@ -47,13 +47,10 @@ public :
 	
 public :
 	Resource() ;
-	explicit Resource( const xml::Node& entry ) ;
-	explicit Resource( const Entry& entry, Resource *parent = 0 ) ;
-	explicit Resource( const fs::path& path ) ;
-	explicit Resource( const Json& json, Resource *parent = 0 ) ;
-	void Swap( Resource& coll ) ;
+	Resource( const std::string& name, const std::string& kind ) ;
 	
 	// default copy ctor & op= are fine
+	void Swap( Resource& coll ) ;
 
 	bool IsFolder() const ;
 
@@ -71,11 +68,10 @@ public :
 	bool IsInRootTree() const ;
 	bool IsRoot() const ;
 
-	void FromRemote( const Entry& e ) ;
-	void FromLocal() ;
+	void FromRemote( const Entry& remote, const DateTime& last_sync ) ;
+	void FromLocal( const DateTime& last_sync ) ;
 	
 	void Sync( http::Agent *http, const http::Headers& auth ) ;
-	void Delete( http::Agent* http, const http::Headers& auth ) ;
 
 	Json Serialize() const ;
 	
@@ -109,7 +105,14 @@ private :
 		remote_new,
 		
 		/// Resource exists in both local & remote, but remote is newer.		
-		remote_changed
+		remote_changed,
+		
+		/// Resource delete in remote, need to delete in local
+		remote_deleted,
+		
+		
+		/// invalid value
+		unknown
 	} ;
 
 	friend std::ostream& operator<<( std::ostream& os, State s ) ;
@@ -119,6 +122,9 @@ private :
 	bool EditContent( http::Agent* http, const http::Headers& auth ) ;
 	bool Create( http::Agent* http, const http::Headers& auth ) ;
 	bool Upload( http::Agent* http, const std::string& link, const http::Headers& auth, bool post ) ;
+	void FromRemoteFolder( const Entry& remote, const DateTime& last_sync ) ;
+	void DeleteLocal() ;
+	void DeleteRemote( http::Agent* http, const http::Headers& auth ) ;
 	
 private :
 	Entry					m_entry ;
