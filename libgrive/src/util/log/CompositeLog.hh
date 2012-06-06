@@ -19,48 +19,25 @@
 
 #pragma once
 
-#include "State.hh"
+#include "CommonLog.hh"
 
-#include "http/Header.hh"
-#include "util/Exception.hh"
-
-#include <string>
+#include <memory>
 #include <vector>
 
-namespace gr {
+namespace gr { namespace log {
 
-namespace http
-{
-	class Agent ;
-}
-
-class Entry ;
-class OAuth2 ;
-class Json ;
-
-class Drive
+class CompositeLog : public CommonLog
 {
 public :
-	Drive( OAuth2& auth, const Json& options ) ;
+	CompositeLog() ;
+	~CompositeLog() ;
+	
+	LogBase* Add( std::auto_ptr<LogBase> log ) ;
 
-	void Update() ;
-	void Sync() ;
-	void SaveState() ;
-	
-	struct Error : virtual Exception {} ;
-	
-private :
-	void SyncFolders( http::Agent *http ) ;
-    void file();
-	void FromRemote( const Entry& entry ) ;
-	void FromChange( const Entry& entry ) ;
-	
-private :
-	OAuth2&			m_auth ;
-	http::Header	m_http_hdr ;
+	void Log( const log::Fmt& msg, log::Serverity s ) ;
 
-	std::string		m_resume_link ;
-	State			m_state ;
+private :
+	std::vector<LogBase*>			m_logs ;
 } ;
 
-} // end of namespace
+}} // end of namespace

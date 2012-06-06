@@ -19,48 +19,22 @@
 
 #pragma once
 
-#include "State.hh"
+#include "Log.hh"
 
-#include "http/Header.hh"
-#include "util/Exception.hh"
+#include <bitset>
 
-#include <string>
-#include <vector>
+namespace gr { namespace log {
 
-namespace gr {
-
-namespace http
-{
-	class Agent ;
-}
-
-class Entry ;
-class OAuth2 ;
-class Json ;
-
-class Drive
+class CommonLog : public LogBase
 {
 public :
-	Drive( OAuth2& auth, const Json& options ) ;
-
-	void Update() ;
-	void Sync() ;
-	void SaveState() ;
+	CommonLog() ;
 	
-	struct Error : virtual Exception {} ;
+	bool Enable( log::Serverity s, bool enable = true ) ;
+	bool IsEnabled( log::Serverity s ) const ;
 	
 private :
-	void SyncFolders( http::Agent *http ) ;
-    void file();
-	void FromRemote( const Entry& entry ) ;
-	void FromChange( const Entry& entry ) ;
-	
-private :
-	OAuth2&			m_auth ;
-	http::Header	m_http_hdr ;
-
-	std::string		m_resume_link ;
-	State			m_state ;
+	std::bitset<serverity_count>	m_enabled ;
 } ;
 
-} // end of namespace
+} } // end of namespace

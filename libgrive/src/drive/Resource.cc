@@ -20,6 +20,7 @@
 #include "Resource.hh"
 #include "CommonUri.hh"
 
+#include "http/Agent.hh"
 #include "http/Download.hh"
 // #include "http/ResponseLog.hh"
 #include "http/StringResponse.hh"
@@ -27,11 +28,13 @@
 #include "protocol/Json.hh"
 #include "util/CArray.hh"
 #include "util/Crypt.hh"
-#include "util/Log.hh"
+#include "util/log/Log.hh"
 #include "util/OS.hh"
 #include "util/StdioFile.hh"
 #include "xml/Node.hh"
 #include "xml/NodeSet.hh"
+
+#include <boost/exception/all.hpp>
 
 #include <cassert>
 
@@ -68,6 +71,9 @@ void Resource::FromRemoteFolder( const Entry& remote, const DateTime& last_sync 
 {
 	fs::path path = Path() ;
 	
+	if ( remote.CreateLink().empty() )
+		Log( "folder %1% is read-only", path, log::verbose ) ;
+	
 	// already sync
 	if ( fs::is_directory( path ) )
 	{
@@ -86,7 +92,7 @@ void Resource::FromRemoteFolder( const Entry& remote, const DateTime& last_sync 
 		}
 		else
 		{
-			Log( "folder %1% is created in local", path, log::verbose ) ;
+			Log( "folder %1% is created in remote", path, log::verbose ) ;
 			fs::create_directories( path ) ;
 			m_state = sync ;
 		}
@@ -112,18 +118,47 @@ void Resource::FromRemoteFolder( const Entry& remote, const DateTime& last_sync 
 /// one is newer.
 void Resource::FromRemote( const Entry& remote, const DateTime& last_sync )
 {
-	fs::path path = Path() ;
-	
 	// sync folder
 	if ( remote.Kind() == "folder" && IsFolder() )
 		FromRemoteFolder( remote, last_sync ) ;
+	else
+		FromRemoteFile( remote, last_sync ) ;
 	
+	m_entry.AssignID( remote ) ;
+	assert( m_state != unknown ) ;
+	
+	if ( m_state == remote_new || m_state == remote_changed )
+		m_entry.Update( remote.MD5(), remote.MTime() ) ;
+}
+
+void Resource::FromRemoteFile( const Entry& remote, const DateTime& last_sync )
+{
+	assert( m_parent != 0 ) ;
+	
+	fs::path path = Path() ;
+
+	// recursively create/delete folder
+	if ( m_parent->m_state == remote_new || m_parent->m_state == remote_deleted ||
+		 m_parent->m_state == local_new  || m_parent->m_state == local_deleted )
+	{
+		Log( "file %1% parent %2% recursively in %3% (%4%)", path,
+			( m_parent->m_state == remote_new || m_parent->m_state == local_new )      ? "created" : "deleted",
+			( m_parent->m_state == remote_new || m_parent->m_state == remote_deleted ) ? "remote"  : "local",
+			m_parent->m_state ) ;
+		
+		m_state = m_parent->m_state ;
+	}
+
 	// local not exists
 	else if ( !fs::exists( path ) )
 	{
-		if ( remote.MTime() > last_sync )
+		Trace( "file %1% change stamp = %2%", Path(), remote.ChangeStamp() ) ;
+		
+		if ( remote.MTime() > last_sync || remote.ChangeStamp() > 0 )
 		{
-			Log( "file %1% is created in remote", path, log::verbose ) ;
+			Log( "file %1% is created in remote (change %2%)", path,
+				remote.ChangeStamp(), log::verbose ) ;
+			
 			m_state = remote_new ;
 		}
 		else
@@ -159,11 +194,8 @@ void Resource::FromRemote( const Entry& remote, const DateTime& last_sync )
 			m_state = local_changed ;
 		}
 		else
-			Trace( "file 1% state is %2%", Name(), m_state ) ;
+			Trace( "file %1% state is %2%", Name(), m_state ) ;
 	}
-	
-	m_entry.AssignID( remote ) ;
-	assert( m_state != unknown ) ;
 }
 
 /// Update the resource with the attributes of local file or directory. This
@@ -183,6 +215,7 @@ void Resource::FromLocal( const DateTime& last_sync )
 		m_state = ( mtime > last_sync ? local_new : remote_deleted ) ;
 		
 		m_entry.FromLocal( path ) ;
+		Trace( "file %1% read from local %2%", path, m_state ) ;
 	}
 	
 	assert( m_state != unknown ) ;
@@ -195,7 +228,7 @@ std::string Resource::SelfHref() const
 
 std::string Resource::Name() const
 {
-	return IsFolder() ? m_entry.Title() : m_entry.Filename() ;
+	return m_entry.Name() ;
 }
 
 std::string Resource::ResourceID() const
@@ -269,7 +302,7 @@ Resource* Resource::FindChild( const std::string& name )
 }
 
 // try to change the state to "sync"
-void Resource::Sync( http::Agent *http, const http::Headers& auth )
+void Resource::Sync( http::Agent *http, const http::Header& auth )
 {
 	assert( m_state != unknown ) ;
 
@@ -290,8 +323,13 @@ void Resource::Sync( http::Agent *http, const http::Headers& auth )
 		break ;
 	
 	case local_deleted :
-		Log( "sync %1% deleted in local. deleting remote", Path(), log::verbose ) ;
-		DeleteRemote( http, auth ) ;
+		if ( m_parent->m_state == local_deleted )
+			Log( "sync %1% parent deleted in local.", Path(), log::verbose ) ;
+		else
+		{
+			Log( "sync %1% deleted in local. deleting remote", Path(), log::verbose ) ;
+			DeleteRemote( http, auth ) ;
+		}
 		break ;
 	
 	case local_changed :
@@ -308,8 +346,13 @@ void Resource::Sync( http::Agent *http, const http::Headers& auth )
 		break ;
 	
 	case remote_deleted :
-		Log( "sync %1% deleted in remote. deleting local", Path(), log::verbose ) ;
-		DeleteLocal() ;
+		if ( m_parent->m_state == remote_deleted )
+			Log( "sync %1% parent deleted in remote.", Path(), log::verbose ) ;
+		else
+		{
+			Log( "sync %1% deleted in remote. deleting local", Path(), log::verbose ) ;
+			DeleteLocal() ;
+		}
 		break ;
 	
 	case sync :
@@ -324,52 +367,65 @@ void Resource::Sync( http::Agent *http, const http::Headers& auth )
 /// this function doesn't really remove the local file. it renames it.
 void Resource::DeleteLocal()
 {
+	static const boost::format trash_file( "%1%-%2%" ) ;
+
 	assert( m_parent != 0 ) ;
 	fs::path parent = m_parent->Path() ;
-	fs::path dest	= parent / ( "." + Name() ) ;
+	fs::path dest	= ".trash" / parent / Name() ;
 	
 	std::size_t idx = 1 ;
 	while ( fs::exists( dest ) && idx != 0 )
-	{
-		std::ostringstream oss ;
-		oss << '.' << Name() << "-" << idx++ ;
-		dest = parent / oss.str() ;
-	}
+		dest = ".trash" / parent / (boost::format(trash_file) % Name() % idx++).str() ;
 	
 	// wrap around! just remove the file
 	if ( idx == 0 )
 		fs::remove_all( Path() ) ;
 	else
+	{
+		fs::create_directories( dest.parent_path() ) ;
 		fs::rename( Path(), dest ) ;
+	}
 }
 
-void Resource::DeleteRemote( http::Agent *http, const http::Headers& auth )
+void Resource::DeleteRemote( http::Agent *http, const http::Header& auth )
 {
-	http::Headers hdr( auth ) ;
-	hdr.push_back( "If-Match: " + m_entry.ETag() ) ;
-	
 	http::StringResponse str ;
+	
 	try
 	{
+		http::Header hdr( auth ) ;
+		hdr.Add( "If-Match: " + m_entry.ETag() ) ;
+		
+		// doesn't know why, but an update before deleting seems to work always
+		http::XmlResponse xml ;
+		http->Get( m_entry.SelfHref(), &xml, hdr ) ;
+		m_entry.Update( xml.Response() ) ;
+	
 		http->Custom( "DELETE", m_entry.SelfHref(), &str, hdr ) ;
 	}
-	catch ( Exception& )
+	catch ( Exception& e )
 	{
-		Trace( "response = %1%", str.Response() ) ;
-		throw ;
+		// don't rethrow here. there are some cases that I don't know why
+		// the delete will fail.
+		Trace( "Exception %1% %2%",
+			boost::diagnostic_information(e),
+			str.Response() ) ;
 	}
 }
 
 
-void Resource::Download( http::Agent* http, const fs::path& file, const http::Headers& auth ) const
+void Resource::Download( http::Agent* http, const fs::path& file, const http::Header& auth ) const
 {
 	http::Download dl( file.string(), http::Download::NoChecksum() ) ;
 	long r = http->Get( m_entry.ContentSrc(), &dl, auth ) ;
 	if ( r <= 400 )
+	{
+		assert( m_entry.MTime() != DateTime() ) ;
 		os::SetFileTime( file, m_entry.MTime() ) ;
+	}
 }
 
-bool Resource::EditContent( http::Agent* http, const http::Headers& auth )
+bool Resource::EditContent( http::Agent* http, const http::Header& auth )
 {
 	assert( m_parent != 0 ) ;
 
@@ -387,7 +443,7 @@ bool Resource::EditContent( http::Agent* http, const http::Headers& auth )
 	return Upload( http, m_entry.EditLink(), auth, false ) ;
 }
 
-bool Resource::Create( http::Agent* http, const http::Headers& auth )
+bool Resource::Create( http::Agent* http, const http::Header& auth )
 {
 	assert( m_parent != 0 ) ;
 	assert( m_parent->IsFolder() ) ;
@@ -404,8 +460,8 @@ bool Resource::Create( http::Agent* http, const http::Headers& auth )
 		
 		std::string meta = (boost::format(xml_meta) % "folder" % Name() ).str() ;
 		
-		http::Headers hdr( auth ) ;
-		hdr.push_back( "Content-Type: application/atom+xml" ) ;
+		http::Header hdr( auth ) ;
+		hdr.Add( "Content-Type: application/atom+xml" ) ;
 		
 		http::XmlResponse xml ;
 // 		http::ResponseLog log( "create", ".xml", &xml ) ;
@@ -425,7 +481,7 @@ bool Resource::Create( http::Agent* http, const http::Headers& auth )
 	}
 }
 
-bool Resource::Upload( http::Agent* http, const std::string& link, const http::Headers& auth, bool post )
+bool Resource::Upload( http::Agent* http, const std::string& link, const http::Header& auth, bool post )
 {
 	StdioFile file( Path() ) ;
 	
@@ -439,12 +495,12 @@ bool Resource::Upload( http::Agent* http, const std::string& link, const http::H
 	std::ostringstream xcontent_len ;
 	xcontent_len << "X-Upload-Content-Length: " << data.size() ;
 	
-	http::Headers hdr( auth ) ;
-	hdr.push_back( "Content-Type: application/atom+xml" ) ;
-	hdr.push_back( "X-Upload-Content-Type: application/octet-stream" ) ;
-	hdr.push_back( xcontent_len.str() ) ;
-  	hdr.push_back( "If-Match: " + m_entry.ETag() ) ;
-	hdr.push_back( "Expect:" ) ;
+	http::Header hdr( auth ) ;
+	hdr.Add( "Content-Type: application/atom+xml" ) ;
+	hdr.Add( "X-Upload-Content-Type: application/octet-stream" ) ;
+	hdr.Add( xcontent_len.str() ) ;
+  	hdr.Add( "If-Match: " + m_entry.ETag() ) ;
+	hdr.Add( "Expect:" ) ;
 	
 	std::string meta = (boost::format( xml_meta ) % m_entry.Kind() % Name()).str() ;
 	
@@ -454,9 +510,9 @@ bool Resource::Upload( http::Agent* http, const std::string& link, const http::H
 	else
 		http->Put( link, meta, &str, hdr ) ;
 	
-	http::Headers uphdr ;
-	uphdr.push_back( "Expect:" ) ;
-	uphdr.push_back( "Accept:" ) ;
+	http::Header uphdr ;
+	uphdr.Add( "Expect:" ) ;
+	uphdr.Add( "Accept:" ) ;
 
 	// the content upload URL is in the "Location" HTTP header
 	std::string uplink = http->RedirLocation() ;
@@ -529,6 +585,11 @@ std::string Resource::StateStr() const
 bool Resource::IsRoot() const
 {
 	return m_parent == 0 ;
+}
+
+bool Resource::HasID() const
+{
+	return !m_entry.SelfHref().empty() && !m_entry.ResourceID().empty() ;
 }
 
 } // end of namespace

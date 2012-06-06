@@ -21,14 +21,15 @@
 
 #include "CommonUri.hh"
 #include "Entry.hh"
+#include "Feed.hh"
 
 #include "http/Agent.hh"
-// #include "http/ResponseLog.hh"
+#include "http/ResponseLog.hh"
 #include "http/XmlResponse.hh"
 #include "protocol/Json.hh"
 #include "protocol/OAuth2.hh"
 #include "util/Destroy.hh"
-#include "util/Log.hh"
+#include "util/log/Log.hh"
 #include "xml/Node.hh"
 #include "xml/NodeSet.hh"
 
@@ -56,65 +57,88 @@ Drive::Drive( OAuth2& auth, const Json& options ) :
 	m_auth( auth ),
 	m_state( state_file, options )
 {
-	m_http_hdr.push_back( "Authorization: Bearer " + m_auth.AccessToken() ) ;
-	m_http_hdr.push_back( "GData-Version: 3.0" ) ;
+	m_http_hdr.Add( "Authorization: Bearer " + m_auth.AccessToken() ) ;
+	m_http_hdr.Add( "GData-Version: 3.0" ) ;
 
 	Log( "Reading local directories", log::info ) ;
 	m_state.FromLocal( "." ) ;
 	
 	http::Agent http ;
-	SyncFolders( &http ) ;
+
+	long prev_stamp = m_state.ChangeStamp() ;
 	
-	Log( "Reading remote server file list", log::info ) ;
+	// get metadata
 	http::XmlResponse xrsp ;
+	http::ResponseLog log( "meta-", ".xml", &xrsp ) ;
+	http.Get( "https://docs.google.com/feeds/metadata/default", &log, m_http_hdr ) ;
+	Trace( "return %1%", xrsp.Response()["docs:largestChangestamp"] ) ;
+	m_state.ChangeStamp( 
+		std::atoi(xrsp.Response()["docs:largestChangestamp"]["@value"].front().Value().c_str()) ) ;
+	
+	SyncFolders( &http ) ;
+
+	Log( "Reading remote server file list", log::info ) ;
 	http.Get( feed_base + "?showfolders=true&showroot=true", &xrsp, m_http_hdr ) ;
 	xml::Node resp = xrsp.Response() ;
 
 	m_resume_link = resp["link"].
 		Find( "@rel", "http://schemas.google.com/g/2005#resumable-create-media" )["@href"] ;
 
-	bool has_next = false ;
+	Feed feed( resp ) ;
 	do
 	{
-		xml::NodeSet entries = resp["entry"] ;
-		for ( xml::NodeSet::iterator i = entries.begin() ; i != entries.end() ; ++i )
-		{
-			if ( (*i)["content"] == "" )
-				continue ;
+		std::for_each( feed.begin(), feed.end(), boost::bind( &Drive::FromRemote, this, _1 ) ) ;
+	} while ( feed.GetNext( &http, m_http_hdr ) ) ;
 
-			Entry entry( *i ) ;
-			if ( entry.Kind() != "folder" )
-			{
-				Resource *parent = m_state.FindByHref( entry.ParentHref() ) ;
-				std::string fn = entry.Filename() ;				
-				
-				if ( fn.empty() )
-					Log( "file \"%1%\" is a google document, ignored", entry.Title(), log::verbose ) ;
-				
-				else if ( fn.find('/') != fn.npos )
-					Log( "file \"%1%\" contains a slash in its name, ignored", entry.Title(), log::verbose ) ;
-				
-				else if ( parent == 0 || !parent->IsInRootTree() )
-					Log( "file \"%1%\" parent doesn't exist, ignored", entry.Title(), log::verbose ) ;
-				
-				else if ( parent != 0 && !parent->IsFolder() )
-					Log( "warning: entry %1% has parent %2% which is not a folder, ignored",
-						entry.Title(), parent->Name(), log::verbose ) ;
-				
-				else
-					m_state.FromRemote( entry ) ;
-			}
-		}
+	// pull the changes feed
+	if ( prev_stamp != -1 )
+	{
+		boost::format changes_uri( "https://docs.google.com/feeds/default/private/changes?start-index=%1%" ) ;
+// 		http::ResponseLog log2( "changes-", ".xml", &xrsp ) ;
+		http.Get( (changes_uri%(prev_stamp+1)).str(), &xrsp, m_http_hdr ) ;
 		
-		xml::NodeSet nss = resp["link"].Find( "@rel", "next" ) ;
-		has_next = !nss.empty() ;
+		Feed changes( xrsp.Response() ) ;
+		std::for_each( changes.begin(), changes.end(), boost::bind( &Drive::FromChange, this, _1 ) ) ;
+	}
+}
 
-		if ( has_next )
-		{
-			http.Get( nss["@href"], &xrsp, m_http_hdr ) ;
-			resp = xrsp.Response() ;
-		}
-	} while ( has_next ) ;
+void Drive::FromRemote( const Entry& entry )
+{
+	if ( entry.Kind() != "folder" && !entry.ContentSrc().empty() )
+	{
+		Resource *parent = m_state.FindByHref( entry.ParentHref() ) ;
+		std::string fn = entry.Filename() ;				
+		
+		if ( fn.empty() )
+			Log( "file \"%1%\" is a google document, ignored", entry.Title(), log::verbose ) ;
+		
+		else if ( fn.find('/') != fn.npos )
+			Log( "file \"%1%\" contains a slash in its name, ignored", entry.Title(), log::verbose ) ;
+		
+		else if ( parent == 0 || !parent->IsInRootTree() )
+			Log( "file \"%1%\" parent doesn't exist, ignored", entry.Title(), log::verbose ) ;
+		
+		else if ( parent != 0 && !parent->IsFolder() )
+			Log( "warning: entry %1% has parent %2% which is not a folder, ignored",
+				entry.Title(), parent->Name(), log::verbose ) ;
+		
+		else
+			m_state.FromRemote( entry ) ;
+	}
+}
+
+void Drive::FromChange( const Entry& entry )
+{
+	std::string fn = entry.Filename() ;				
+	
+	if ( entry.IsRemoved() )
+		Log( "file \"%1%\" represents a deletion, ignored", entry.Title(), log::verbose ) ;
+	
+	else if ( fn.empty() )
+		Log( "file \"%1%\" is a google document, ignored", entry.Title(), log::verbose ) ;
+	
+	else if ( !entry.ContentSrc().empty() )
+		m_state.FromChange( entry ) ;
 }
 
 void Drive::SaveState()
@@ -127,6 +151,7 @@ void Drive::SyncFolders( http::Agent *http )
 	Log( "Synchronizing folders", log::info ) ;
 
 	http::XmlResponse xml ;
+// 	http::ResponseLog log( "dir-", ".xml", &xml ) ;
 	http->Get( feed_base + "/-/folder?max-results=50&showroot=true", &xml, m_http_hdr ) ;
 
 	xml::Node resp = xml.Response() ;

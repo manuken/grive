@@ -59,10 +59,13 @@ public :
 	std::string ETag() const ;
 	
 	std::string SelfHref() const ;
+	std::string AltSelf() const ;
 	std::string ParentHref() const ;
 	std::string ContentSrc() const ;
 	std::string EditLink() const ;
 	std::string CreateLink() const ;
+	long ChangeStamp() const ;
+	bool IsRemoved() const ;
 	
 	const std::vector<std::string>& ParentHrefs() const ;
 	
@@ -71,6 +74,8 @@ public :
 	void Update( const xml::Node& entry ) ;
 	void Update( const std::string& md5, const DateTime& mtime ) ;
 
+	std::string Name() const ;
+	
 private :
 	std::string		m_title ;
 	std::string		m_filename ;
@@ -82,11 +87,15 @@ private :
 	std::vector<std::string>	m_parent_hrefs ;
 	
 	std::string		m_self_href ;
+	std::string		m_alt_self ;
 	std::string		m_content_src ;
 	std::string		m_edit_link ;
 	std::string		m_create_link ;
 
+	long			m_change_stamp ;
+	
 	DateTime		m_mtime ;
+	bool			m_is_removed ;
 } ;
 
 } // end of namespace

@@ -2,7 +2,7 @@ project(libgrive)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/Modules/")
 
-find_package(OpenSSL REQUIRED)
+find_package(LibGcrypt REQUIRED)
 find_package(JSONC REQUIRED)
 find_package(CURL REQUIRED)
 find_package(EXPAT REQUIRED)
@@ -58,6 +58,7 @@ file (GLOB LIBGRIVE_SRC
 	src/http/*.cc
 	src/protocol/*.cc
 	src/util/*.cc
+	src/util/log/*.cc
 	src/xml/*.cc
 )
 
@@ -68,11 +69,12 @@ add_definitions(
 )
 
 add_library( grive SHARED ${LIBGRIVE_SRC} ${OPT_SRC} )
+add_library( grive-static STATIC ${LIBGRIVE_SRC} ${OPT_SRC} )
 
 target_link_libraries( grive
 	${CURL_LIBRARIES}
 	${JSONC_LIBRARY}
-	${OPENSSL_LIBRARIES}
+	${LIBGCRYPT_LIBRARIES}
 	${GDBM_LIBRARIES}
 	${Boost_LIBRARIES}
 	${IBERTY_LIBRARY}
@@ -84,12 +86,15 @@ set_target_properties(grive PROPERTIES
     SOVERSION 0 VERSION ${GRIVE_VERSION}
 )
 
+set_target_properties(grive grive-static PROPERTIES OUTPUT_NAME grive)
+
 if ( LIB_INSTALL_DIR )
 else()
 	set ( LIB_INSTALL_DIR ${CMAKE_INSTALL_PREFIX}/lib )
 endif()
 
 install(TARGETS grive LIBRARY DESTINATION ${LIB_INSTALL_DIR} )
+install(TARGETS grive-static ARCHIVE DESTINATION ${LIB_INSTALL_DIR} )
 install(FILES ${DRIVE_HEADERS} DESTINATION include/grive/drive)
 install(FILES ${PROTOCOL_HEADERS} DESTINATION include/grive/protocol)
 install(FILES ${UTIL_HEADERS} DESTINATION include/grive/util)

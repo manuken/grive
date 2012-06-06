@@ -22,8 +22,9 @@
 #include "Resource.hh"
 #include "CommonUri.hh"
 
+#include "http/Agent.hh"
 #include "util/Crypt.hh"
-#include "util/Log.hh"
+#include "util/log/Log.hh"
 #include "protocol/Json.hh"
 
 #include <boost/bind.hpp>
@@ -38,7 +39,8 @@
 
 namespace gr {
 
-State::State( const fs::path& filename, const Json& options )
+State::State( const fs::path& filename, const Json& options ) :
+	m_cstamp( -1 )
 {
 	Read( filename ) ;
 	
@@ -46,6 +48,8 @@ State::State( const fs::path& filename, const Json& options )
 	Json force ;
 	if ( options.Get("force", force) && force.Bool() )
 		m_last_sync = DateTime() ;
+	
+	Log( "last sync time: %1%", m_last_sync, log::info ) ;
 }
 
 /// Synchronize local directory. Build up the resource tree from files and folders
@@ -53,6 +57,11 @@ State::State( const fs::path& filename, const Json& options )
 void State::FromLocal( const fs::path& p )
 {
 	FromLocal( p, m_res.Root() ) ;
+}
+
+bool State::IsIgnore( const std::string& filename )
+{
+	return filename[0] == '.' ;
 }
 
 void State::FromLocal( const fs::path& p, gr::Resource* folder )
@@ -67,7 +76,7 @@ void State::FromLocal( const fs::path& p, gr::Resource* folder )
 	{
 		std::string fname = i->path().filename().string() ;
 	
-		if ( fname[0] == '.' )
+		if ( IsIgnore(fname) )
 			Log( "file %1% is ignored by grive", fname, log::verbose ) ;
 		
 		else
@@ -92,7 +101,10 @@ void State::FromLocal( const fs::path& p, gr::Resource* folder )
 
 void State::FromRemote( const Entry& e )
 {
-	if ( !Update( e ) )
+	if ( IsIgnore( e.Name() ) )
+		Log( "%1% %2% is ignored by grive", e.Kind(), e.Name(), log::verbose ) ;
+
+	else if ( !Update( e ) )
 	{
 		m_unresolved.push_back( e ) ;
 	}
@@ -127,10 +139,21 @@ std::size_t State::TryResolveEntry()
 	return count ;
 }
 
+void State::FromChange( const Entry& e )
+{
+	if ( IsIgnore( e.Name() ) )
+		Log( "%1% %2% is ignored by grive", e.Kind(), e.Name(), log::verbose ) ;
+	
+	// entries in the change feed is always treated as newer in remote,
+	// so we override the last sync time to 0
+	else if ( Resource *res = m_res.FindByHref( e.AltSelf() ) )
+		m_res.Update( res, e, DateTime() ) ;
+}
+
 bool State::Update( const Entry& e )
 {
 	assert( !e.ParentHref().empty() ) ;
-	
+
 	if ( Resource *res = m_res.FindByHref( e.SelfHref() ) )
 	{
 		m_res.Update( res, e, m_last_sync ) ;
@@ -161,10 +184,6 @@ bool State::Update( const Entry& e )
 			// update the state of the resource
 			m_res.Update( child, e, m_last_sync ) ;
 		}
-		else
-		{
-			Trace( "what here? %1%", e.Title() ) ;
-		}
 		
 		return true ;
 	}
@@ -181,7 +200,6 @@ Resource* State::Find( const fs::path& path )
 {
 	return m_res.FindByPath( path ) ;
 }
-
 
 State::iterator State::begin()
 {
@@ -203,6 +221,8 @@ void State::Read( const fs::path& filename )
 		m_last_sync.Assign(
 			last_sync["sec"].Int(),
 			last_sync["nsec"].Int() ) ;
+		
+		m_cstamp = json["change_stamp"].Int() ;
 	}
 	catch ( Exception& )
 	{
@@ -218,17 +238,28 @@ void State::Write( const fs::path& filename ) const
 	
 	Json result ;
 	result.Add( "last_sync", last_sync ) ;
+	result.Add( "change_stamp", Json(m_cstamp) ) ;
 	
 	std::ofstream fs( filename.string().c_str() ) ;
 	fs << result ;
 }
 
-void State::Sync( http::Agent *http, const http::Headers& auth )
+void State::Sync( http::Agent *http, const http::Header& auth )
 {
 	std::for_each( m_res.begin(), m_res.end(),
 		boost::bind( &Resource::Sync, _1, http, auth ) ) ;
 	
 	m_last_sync = DateTime::Now() ;
+}
+
+long State::ChangeStamp() const
+{
+	return m_cstamp ;
+}
+
+void State::ChangeStamp( long cstamp )
+{
+	m_cstamp = cstamp ;
 }
 
 } // end of namespace

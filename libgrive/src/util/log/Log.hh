@@ -20,6 +20,7 @@
 #pragma once
 
 #include <boost/format.hpp>
+#include <memory>
 
 namespace gr {
 
@@ -45,7 +46,11 @@ namespace log
 		error,
 		
 		/// grive cannot proceed
-		critical
+		critical,
+		
+		
+		/// must be put at the end, equal to number of serverities
+		serverity_count
 	} ;
 	
 	typedef boost::format Fmt ;
@@ -57,13 +62,25 @@ class LogBase
 {
 public :
 	virtual void Log( const log::Fmt& msg, log::Serverity s = log::info ) = 0 ;
-	virtual void Enable( log::Serverity s, bool enable = true ) = 0 ;
+	virtual bool Enable( log::Serverity s, bool enable = true ) = 0 ;
+	virtual bool IsEnabled( log::Serverity s ) const = 0 ;
 	
-	static LogBase* Inst( LogBase *log = 0 ) ;
+	static LogBase* Inst( std::auto_ptr<LogBase> log = std::auto_ptr<LogBase>() ) ;
+	~LogBase() ;
 
 protected :
 	LogBase() ;
-	~LogBase() ;
+} ;
+
+class DisableLog
+{
+public :
+	DisableLog( log::Serverity s ) ;
+	~DisableLog() ;
+
+private :
+	log::Serverity	m_sev ;
+	bool			m_prev ;
 } ;
 
 void Log( const std::string& str, log::Serverity s = log::info ) ;
@@ -84,6 +101,18 @@ template <typename P1, typename P2, typename P3>
 void Log( const std::string& fmt, const P1& p1, const P2& p2, const P3& p3, log::Serverity s = log::info )
 {
 	LogBase::Inst()->Log( log::Fmt(fmt) % p1 % p2 % p3, s ) ;
+}
+
+template <typename P1, typename P2, typename P3, typename P4>
+void Log(
+	const std::string& fmt,
+	const P1& p1,
+	const P2& p2,
+	const P3& p3,
+	const P4& p4,
+	log::Serverity s = log::info )
+{
+	LogBase::Inst()->Log( log::Fmt(fmt) % p1 % p2 % p3 % p4, s ) ;
 }
 
 void Trace( const std::string& str ) ;

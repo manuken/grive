@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include "Header.hh"
 #include "util/Exception.hh"
 
 namespace gr { namespace http {
@@ -36,5 +37,8 @@ typedef boost::error_info<struct HttpResponseStrTag, std::string>	HttpResponseTe
 
 // URL
 typedef boost::error_info<struct UrlTag, std::string>		Url ;
+
+// HTTP headers
+typedef boost::error_info<struct HeaderTag, Header>		HttpHeader ;
 
 } } // end of namespace

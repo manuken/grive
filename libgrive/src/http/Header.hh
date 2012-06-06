@@ -19,48 +19,32 @@
 
 #pragma once
 
-#include "State.hh"
-
-#include "http/Header.hh"
-#include "util/Exception.hh"
-
+#include <iosfwd>
 #include <string>
 #include <vector>
 
-namespace gr {
+namespace gr { namespace http {
 
-namespace http
+class Header
 {
-	class Agent ;
-}
+private :
+	typedef std::vector<std::string>	Vec ;
 
-class Entry ;
-class OAuth2 ;
-class Json ;
-
-class Drive
-{
 public :
-	Drive( OAuth2& auth, const Json& options ) ;
+	typedef Vec::const_iterator	iterator ;
 
-	void Update() ;
-	void Sync() ;
-	void SaveState() ;
+public :
+	Header() ;
 	
-	struct Error : virtual Exception {} ;
+	void Add( const std::string& str ) ;
 	
-private :
-	void SyncFolders( http::Agent *http ) ;
-    void file();
-	void FromRemote( const Entry& entry ) ;
-	void FromChange( const Entry& entry ) ;
-	
-private :
-	OAuth2&			m_auth ;
-	http::Header	m_http_hdr ;
+	iterator begin() const ;
+	iterator end() const ;
 
-	std::string		m_resume_link ;
-	State			m_state ;
+private :
+	Vec	m_vec ;
 } ;
 
-} // end of namespace
+std::ostream& operator<<( std::ostream& os, const Header& h ) ;
+
+}} // end of namespace

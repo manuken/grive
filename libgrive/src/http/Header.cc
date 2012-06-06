@@ -17,53 +17,37 @@
 	Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
-#include "Log.hh"
+#include "Header.hh"
 
-#include <cassert>
+#include <algorithm>
+#include <iterator>
+#include <ostream>
 
-namespace gr {
+namespace gr { namespace http {
 
-class MockLog : public LogBase
-{
-public :
-	void Log( const log::Fmt&, log::Serverity )
-	{
-	}
-	
-	void Enable( log::Serverity s, bool enable )
-	{
-	}
-
-} ;
-
-LogBase* LogBase::Inst( LogBase *log )
-{
-	static MockLog mlog ;
-	static LogBase *inst = &mlog ;
-	
-	if ( log != 0 )
-		inst = log ;
-		
-	assert( inst != 0 ) ;
-	return inst ;
-}
-
-LogBase::LogBase()
+Header::Header()
 {
 }
 
-LogBase::~LogBase()
+void Header::Add( const std::string& str )
 {
+	m_vec.push_back( str ) ;
 }
 
-void Log( const std::string& str, log::Serverity s )
+Header::iterator Header::begin() const
 {
-	LogBase::Inst()->Log( log::Fmt(str), s ) ;
+	return m_vec.begin() ;
 }
 
-void Trace( const std::string& str )
+Header::iterator Header::end() const
 {
-	LogBase::Inst()->Log( log::Fmt(str), log::debug ) ;
+	return m_vec.end() ;
 }
 
-} // end of namespace
+std::ostream& operator<<( std::ostream& os, const Header& h )
+{
+	std::copy( h.begin(), h.end(), std::ostream_iterator<std::string>( os, "\n" ) ) ;
+	return os ;
+}
+
+} } // end of namespace

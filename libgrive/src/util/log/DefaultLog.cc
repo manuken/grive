@@ -22,35 +22,24 @@
 #include <cassert>
 #include <iostream>
 
-namespace gr {
+namespace gr { namespace log {
 
 DefaultLog::DefaultLog() :
 	m_log( std::cerr )
 {
-	m_enabled[log::debug]		= false ;
-	m_enabled[log::verbose]		= false ;
-	m_enabled[log::info]		= true ;
-	m_enabled[log::warning]		= true ;
-	m_enabled[log::error]		= true ;
-	m_enabled[log::critical]	= true ;
+// 	Enable(log::debug,		true) ;
+// 	Enable(log::verbose,	true) ;
 }
 
 DefaultLog::DefaultLog( const std::string& filename ) :
 	m_file( filename.c_str() ),
 	m_log( m_file )
 {
-	m_enabled[log::debug]		= false ;
-	m_enabled[log::verbose]		= true ;
-	m_enabled[log::info]		= true ;
-	m_enabled[log::warning]		= true ;
-	m_enabled[log::error]		= true ;
-	m_enabled[log::critical]	= true ;
 }
 
 void DefaultLog::Log( const log::Fmt& msg, log::Serverity s )
 {
-	assert( s >= log::debug && s <= log::critical ) ;
-	if ( m_enabled[s] )
+	if ( IsEnabled(s) )
 	{
 		switch ( s )
 		{
@@ -66,10 +55,4 @@ void DefaultLog::Log( const log::Fmt& msg, log::Serverity s )
 	}
 }
 
-void DefaultLog::Enable( log::Serverity s, bool enable )
-{
-	assert( s >= log::debug && s <= log::critical ) ;
-	m_enabled[s] = enable ;
-}
-
-} // end of namespace
+} } // end of namespace

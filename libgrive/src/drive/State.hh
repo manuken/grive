@@ -21,13 +21,18 @@
 
 #include "ResourceTree.hh"
 
-#include "http/Agent.hh"
 #include "util/DateTime.hh"
 #include "util/FileSystem.hh"
 
 #include <memory>
 
 namespace gr {
+
+namespace http
+{
+	class Agent ;
+	class Header ;
+}
 
 class Json ;
 class Resource ;
@@ -43,6 +48,7 @@ public :
 	
 	void FromLocal( const fs::path& p ) ;
 	void FromRemote( const Entry& e ) ;
+	void FromChange( const Entry& e ) ;
 	void ResolveEntry() ;
 	
 	void Read( const fs::path& filename ) ;
@@ -52,19 +58,25 @@ public :
 	Resource* FindByID( const std::string& id ) ;
 	Resource* Find( const fs::path& path ) ;
 
-	void Sync( http::Agent *http, const http::Headers& auth ) ;
+	void Sync( http::Agent *http, const http::Header& auth ) ;
 	
 	iterator begin() ;
 	iterator end() ;
+	
+	long ChangeStamp() const ;
+	void ChangeStamp( long cstamp ) ;
 	
 private :
 	void FromLocal( const fs::path& p, Resource *folder ) ;
 	bool Update( const Entry& e ) ;
 	std::size_t TryResolveEntry() ;
 
+	static bool IsIgnore( const std::string& filename ) ;
+	
 private :
 	ResourceTree		m_res ;
 	DateTime			m_last_sync ;
+	long				m_cstamp ;
 	
 	std::vector<Entry>	m_unresolved ;
 } ;

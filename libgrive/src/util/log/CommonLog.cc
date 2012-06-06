@@ -17,50 +17,34 @@
 	Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
-#pragma once
+#include "CommonLog.hh"
 
-#include "State.hh"
+namespace gr { namespace log {
 
-#include "http/Header.hh"
-#include "util/Exception.hh"
-
-#include <string>
-#include <vector>
-
-namespace gr {
-
-namespace http
+CommonLog::CommonLog()
 {
-	class Agent ;
+	m_enabled[log::debug]		= false ;
+	m_enabled[log::verbose]		= false ;
+	m_enabled[log::info]		= true ;
+	m_enabled[log::warning]		= true ;
+	m_enabled[log::error]		= true ;
+	m_enabled[log::critical]	= true ;
 }
 
-class Entry ;
-class OAuth2 ;
-class Json ;
-
-class Drive
+bool CommonLog::Enable( log::Serverity s, bool enable )
 {
-public :
-	Drive( OAuth2& auth, const Json& options ) ;
-
-	void Update() ;
-	void Sync() ;
-	void SaveState() ;
+	assert( s >= debug && s < serverity_count ) ;
 	
-	struct Error : virtual Exception {} ;
+	bool prev = m_enabled[s] ;
+	m_enabled[s] = enable ;
 	
-private :
-	void SyncFolders( http::Agent *http ) ;
-    void file();
-	void FromRemote( const Entry& entry ) ;
-	void FromChange( const Entry& entry ) ;
-	
-private :
-	OAuth2&			m_auth ;
-	http::Header	m_http_hdr ;
+	return prev ;
+}
 
-	std::string		m_resume_link ;
-	State			m_state ;
-} ;
+bool CommonLog::IsEnabled( log::Serverity s ) const
+{
+	assert( s >= debug && s < serverity_count ) ;
+	return m_enabled[s] ;
+}
 
-} // end of namespace
+}} // end of namespace

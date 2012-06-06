@@ -19,28 +19,59 @@
 
 #pragma once
 
-#include "Log.hh"
+#include "Entry.hh"
 
-#include <bitset>
-#include <fstream>
+#include "xml/Node.hh"
+#include "xml/NodeSet.hh"
+
+#include <boost/iterator_adaptors.hpp>
+
 #include <string>
 
 namespace gr {
 
-class DefaultLog : public LogBase
+namespace http
+{
+	class Agent ;
+	class Header ;
+}
+
+class Feed
 {
 public :
-	DefaultLog() ;
-	explicit DefaultLog( const std::string& filename ) ;
+	class iterator ;
 
-	void Log( const log::Fmt& msg, log::Serverity s ) ;
-	void Enable( log::Serverity s, bool enable ) ;
+public :
+	explicit Feed( const xml::Node& root ) ;
+	void Assign( const xml::Node& root ) ;
 	
+	iterator begin() const ;
+	iterator end() const ;
+	
+	std::string Next() const ;
+	bool GetNext( http::Agent *http, const http::Header& auth ) ;
+		
 private :
-	std::ofstream	m_file ;
-	std::ostream&	m_log ;
+	xml::Node		m_root ;
+	xml::NodeSet	m_entries ;
+} ;
 
-	std::bitset<5>	m_enabled ;
+class Feed::iterator : public boost::iterator_adaptor<
+	Feed::iterator,
+	xml::Node::iterator,
+	Entry,
+	boost::random_access_traversal_tag,
+	Entry
+>
+{
+public :
+	iterator() ;
+	explicit iterator( xml::Node::iterator i ) ;		
+
+private :
+	friend class boost::iterator_core_access;
+	
+	reference dereference() const ;
 } ;
 
 } // end of namespace
